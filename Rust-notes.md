@@ -1,3 +1,19 @@
+## Ch0 安装Rust
+
+- 使用rustup安装
+
+  ```bash
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+  ```
+
+- 安装时出现的问题（未完全解决）：默认`.cargo`环境变量设置为了`/home/<username>/~/.cargo`，导致在用户家目录下又新建了`~`目录，在安装完rust后，将`.cargo`目录移动到`~/`家目录下，并修改所有可能会更改环境变量的文件，包括`~/.profile`、`/etc/profile`、`/etc/bash.bashrc`、`~/.cargo/env`，将其中的`/home/<username>/~/.cargo`改为`~/.cargo`。但是每当打开终端时，环境变量PATH还是会自动添加`/home/<username>/~/.cargo/bin`
+
+  - 暂时的解决方案：在`~/.bashrc`文件中添加语句，覆盖错误的环境变量:
+
+    ```bash
+    export PATH=~/.cargo/bin:$PATH
+    ```
+
 ## Ch1 Cargo
 
 ### 1.1 使用Cargo创建项目
