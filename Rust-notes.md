@@ -615,3 +615,203 @@ let origin = Point(0, 0, 0);
 
 - 结构体可以直接存放自身拥有所有权的类型，如`String`等
 - 结构体在存储`引用`、`slice`等没有自身所有权的类型时，需要用上生命周期
+
+### 5.2 结构体引用和打印
+
+#### 5.2.1 函数调用结构体
+
+函数引用结构体时，不需要获得其所有权，所以采用引用的方式调用:
+
+```rust
+struct Rectangle {
+    width: u32,
+    height: u32,
+}
+
+fn main() {
+    let rect1 = Rectangle { width: 30, height: 50 };
+    println!(
+        "The area of the rectangle is {} square pixels.",
+        area(&rect1)
+    );
+}
+
+fn area(rectangle: &Rectangle) -> u32 {
+    rectangle.width * rectangle.height
+}
+```
+
+#### 5.2.2 结构体打印
+
+需要使用派生trait
+
+```rust
+#[derive(Debug)]
+struct Rectangle {
+    width: u32,
+    height: u32,
+}
+
+fn main() {
+    let rect1 = Rectangle { width: 30, height: 50 };
+    println!("rect1 is {:?}", rect1);
+    // 或 println!("rect1 is {:#?}", rect1);
+}
+```
+
+### 5.3 方法语法
+
+使用关键字`impl`给结构体定义方法，可以避免另外定义函数
+
+```rust
+#[derive(Debug)]
+struct Rectangle {
+    width: u32,
+    height: u32,
+}
+
+impl Rectangle {
+    // 将self以不可变引用的方式调用
+    fn area(&self) -> u32 {
+        self.width * self.height
+    }
+}
+
+fn main() {
+    let rect1 = Rectangle { width: 30, height: 50 };
+    println!(
+        "The area of the rectangle is {} square pixels.",
+        rect1.area()
+    );
+}
+```
+
+#### 5.3.1 关联函数
+
+在`impl`块中定义不以`self`作为参数的函数，通常用作返回一个结构体实例的构造函数：
+
+```rust
+#[derive(Debug)]
+struct Rectangle {
+    width: u32,
+    height: u32,
+}
+
+impl Rectangle {
+    // 返回一个正方形的实例
+    fn square(size: u32) -> Rectangle {
+        Rectangle { width: size, height: size }
+    }
+}
+```
+
+- 使用`let sq = Rectangle::square(3);`调用关联函数
+
+## Ch6 枚举和模式匹配
+
+### 6.1 定义枚举
+
+- 以IP地址类型为例，通过`enum`定义一个枚举类型：
+
+```rust
+enum IpAddrKind {
+    V4(u8, u8, u8, u8),
+    V6(String),
+}
+```
+
+- 创建`IpAddrKind`实例：
+
+```rust
+let four = IpAddrKind::V4(127.0.0.1);
+let six = IpAddrKind::V6(String::from("::1"));
+```
+
+- 枚举类型也可以像结构体一样使用`impl`为其定义方法
+
+#### 6.1.1 Option枚举
+
+- `Option`是标准库定义的另一个枚举，且被包含在`preclude`中
+
+- Rust没有空值，但拥有`Option`枚举来编码存在或不存在
+
+  ```rust
+  enum Option<T> {
+      Some(T),
+      None,
+  }
+  ```
+
+- `Some`可以包含任意类型的数据
+
+- 使用`None`需要指定类型
+
+  ```rust
+  let some_number = Some(5);
+  let some_string = Some("a string");
+  
+  let absent_number: Option<i32> = None;
+  ```
+
+- `Option<T>`类型的值不能和`T`类型的值直接运算，必须提前进行转换，因此空值在使用前必须被检查
+
+### 6.2 match控制流运算符
+
+```rust
+enum Coin {
+   Penny,
+   Nickel,
+   Dime,
+   Quarter,
+}
+
+fn value_in_cents(coin: Coin) -> u8 {
+    match coin {
+        Coin::Penny => {
+            println!("Lucky penny!");
+            1
+        },
+        Coin::Nickel => 5,
+        Coin::Dime => 10,
+        Coin::Quarter => 25,
+    }
+}
+```
+
+- 每个分支相关联的代码是一个表达式，而表达式的结果值将作为整个`match`表达式的返回值
+
+#### 6.2.1 匹配Option\<T>
+
+```rust
+fn plus_one(x: Option<i32>) -> Option<i32> {
+    match x {
+        None => None,
+        Some(i) => Some(i + 1),
+    }
+}
+
+let five = Some(5);
+let six = plus_one(five);
+let none = plus_one(None);
+```
+
+- 用于空值处理
+- 匹配是有穷的，必须覆盖变量的所有情况
+
+#### 6.2.2 _通配符
+
+- 可以在match的所有分支的最后使用`_`来匹配剩余的所有情况
+
+  ```rust
+  let some_u8_value = 0u8;
+  match some_u8_value {
+      1 => println!("one"),
+      3 => println!("three"),
+      5 => println!("five"),
+      7 => println!("seven"),
+      _ => (),
+  }
+  ```
+
+### 6.3 if let 简单控制流
+
