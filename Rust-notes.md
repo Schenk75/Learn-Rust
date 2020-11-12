@@ -1932,3 +1932,222 @@ println!("With text:\n{}", contents);
 
 ## Ch13 迭代器和闭包
 
+### 13.1 闭包
+
+- 可以保存进变量或作为参数传递给其他函数的匿名函数
+
+- 使用闭包的原因是我们需要在一个位置定义代码，储存代码，并在之后的位置实际调用它
+
+#### 13.1.1 定义闭包
+
+```rust
+use std::thread;
+use std::time::Duration;
+
+let expensive_closure = |num| {
+    println!("calculating slowly...");
+    thread::sleep(Duration::from_secs(2));
+    num
+};
+
+expensive_closure(5);
+```
+
+- 闭包的定义以一对竖线（`|`）开始，在竖线中指定闭包的参数
+- 如果有多于一个参数，可以使用逗号分隔，比如 `|param1, param2|`
+
+#### 13.1.2 闭包类型推断和注解
+
+- 闭包不用于暴露在外的接口：他们储存在变量中并被使用，不用命名他们或暴露给库的用户调用
+- 闭包定义会为每个参数和返回值推断一个具体类型
+- 如果尝试调用闭包两次，第一次使用 `String` 类型作为参数而第二次使用 `u32`，则会得到一个错误
+
+#### 13.1.3 使用带有泛型和Fn trait的闭包
+
+可以创建一个存放闭包和调用闭包结果的结构体，该结构体只会在需要结果时执行闭包，并会缓存结果值，这样余下的代码就不必再负责保存结果并可以复用该值
+
+```rust
+struct Cacher<T>
+	// 闭包有一个 u32 的参数并返回一个 u32
+    where T: Fn(u32) -> u32
+{
+    calculation: T,
+    value: Option<u32>,
+}
+
+impl<T> Cacher<T>
+    where T: Fn(u32) -> u32
+{
+    fn new(calculation: T) -> Cacher<T> {
+        Cacher {
+            calculation,
+            value: None,
+        }
+    }
+
+    fn value(&mut self, arg: u32) -> u32 {
+        match self.value {
+            /*检查self.value是否已经有了一个 Some 的结果值；
+            如果有，它返回 Some 中的值并不会再次执行闭包*/
+            Some(v) => v,
+            /* 如果 self.value 是 None，
+            则会调用 self.calculation 中储存的闭包，
+            将结果保存到 self.value 以便将来使用，
+            并同时返回结果值*/
+            None => {
+                let v = (self.calculation)(arg);
+                self.value = Some(v);
+                v
+            },
+        }
+    }
+}
+```
+
+在执行闭包之前，`value` 将是 `None`。如果使用 `Cacher` 的代码请求闭包的结果，这时会执行闭包并将结果储存在 `value` 字段的 `Some` 成员中。接着如果代码再次请求闭包的结果，这时不再执行闭包，而是会返回存放在 `Some` 成员中的结果。
+
+- `Cacher` 实现的限制：
+  - 第一次初始化 `value` 的值之后，就无法再改动；可以通过使 `Cacher` 存储一个哈希map而不是一个单独的值解决
+  - 它的应用被限制为只接受获取一个 `u32` 值并返回一个 `u32` 值的闭包
+
+#### 13.1.4 闭包会捕获其环境
+
+- 闭包周围的作用域被称为其**环境**
+
+- 闭包可以捕获其环境并访问其被定义的作用域的变量
+
+  ```rust
+  fn main() {
+      let x = 4;
+  	/* x 并不是 equal_to_x 的一个参数，
+  	但equal_to_x 闭包也被允许使用变量 x，
+  	因为它与 equal_to_x 定义于相同的作用域*/
+      let equal_to_x = |z| z == x;
+      let y = 4;
+      assert!(equal_to_x(y));
+  }
+  ```
+
+- 闭包有三种方式捕获其环境
+
+  - `FnOnce` 消费从周围作用域捕获的变量。为了消费捕获到的变量，闭包必须获取其所有权并在定义闭包时将其移动进闭包。其名称的 `Once` 部分代表了闭包不能多次获取相同变量的所有权的事实，所以它只能被调用一次
+  - `FnMut` 获取可变的借用值，所以可以改变其环境
+  - `Fn` 从其环境获取不可变的借用值
+
+### 13.2 迭代器
+
+- **迭代器**（*iterator*）负责遍历序列中的每一项和决定序列何时结束的逻辑
+
+- 迭代器是惰性的，即在调用方法使用迭代器之前它都不会有效果
+
+  ```rust
+  let v1 = vec![1, 2, 3];
+  // 创建一个迭代器，但是没有任何效果
+  let v1_iter = v1.iter();
+  /* 使用迭代器遍历，迭代器中的元素才开始迭代
+  用 for 循环时无需使 v1_iter 可变，
+  因为 for 循环会获取 v1_iter 的所有权并在后台使 v1_iter 可变*/
+  for val in v1_iter {
+      println!("Got: {}", val);
+  }
+  ```
+
+#### 13.2.1 Iterator trait 和 next方法
+
+```rust
+// Iterator 是定义于标准库的 trait
+pub trait Iterator {
+    // Item类型将是迭代器next方法返回元素的类型
+    type Item;
+	// next 一次返回迭代器中的一个项，封装在 Some 中，当迭代器结束时，它返回 None
+    fn next(&mut self) -> Option<Self::Item>;
+
+    // 此处省略了方法的默认实现
+}
+```
+
+在迭代器上直接调用 `next` 方法
+
+```rust
+#[test]
+fn iterator_demonstration() {
+    let v1 = vec![1, 2, 3];
+	// 需要将迭代器定义为可变，因为next方法会改变迭代器
+    let mut v1_iter = v1.iter();
+
+    assert_eq!(v1_iter.next(), Some(&1));
+    assert_eq!(v1_iter.next(), Some(&2));
+    assert_eq!(v1_iter.next(), Some(&3));
+    assert_eq!(v1_iter.next(), None);
+}
+```
+
+#### 13.2.2 消费适配器
+
+- 调用 `next` 方法的方法，如 `sum`
+
+  ```rust
+  #[test]
+  fn iterator_sum() {
+      let v1 = vec![1, 2, 3];
+      let v1_iter = v1.iter();
+  	// 调用 sum 之后不再允许使用 v1_iter 因为调用 sum 时它会获取迭代器的所有权
+      let total: i32 = v1_iter.sum();
+  
+      assert_eq!(total, 6);
+  }
+  ```
+
+#### 13.2.3 迭代器适配器
+
+- 将当前迭代器变为不同类型的迭代器，如 `map`
+
+  ```rust
+  let v1: Vec<i32> = vec![1, 2, 3];
+  // 调用 map 方法创建一个新迭代器，接着调用collect方法消费新迭代器并创建一个vector
+  let v2: Vec<_> = v1.iter().map(|x| x + 1).collect();
+  assert_eq!(v2, vec![2, 3, 4]);
+  ```
+
+#### 13.2.4 创建自定义迭代器
+
+可以实现 `Iterator` trait 来创建任何我们希望的迭代器
+
+```rust
+struct Counter {
+    count: u32,
+}
+
+impl Counter {
+    fn new() -> Counter {
+        Counter { count: 0 }
+    }
+}
+
+impl Iterator for Counter {
+    type Item = u32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.count += 1;
+        if self.count < 6 {
+            Some(self.count)
+        } else {
+            None
+        }
+    }
+}
+
+// 使用自定义的Counter迭代器的多种方法
+// 获取 Counter 实例产生的值，将这些值与另一个 Counter 实例在省略了第一个值之后产生的值配对，将每一对值相乘，只保留那些可以被三整除的结果，然后将所有保留的结果相加
+#[test]
+fn using_other_iterator_trait_methods() {
+    let sum: u32 = Counter::new().zip(Counter::new().skip(1))
+                                 .map(|(a, b)| a * b)
+                                 .filter(|x| x % 3 == 0)
+                                 .sum();
+    assert_eq!(18, sum);
+}
+```
+
+
+
