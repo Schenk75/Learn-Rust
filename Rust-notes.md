@@ -6,9 +6,9 @@
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
   ```
 
-- 安装时出现的问题（未完全解决）：默认`.cargo`环境变量设置为了`/home/<username>/~/.cargo`，导致在用户家目录下又新建了`~`目录，在安装完rust后，将`.cargo`目录移动到`~/`家目录下，并修改所有可能会更改环境变量的文件，包括`~/.profile`、`/etc/profile`、`/etc/bash.bashrc`、`~/.cargo/env`，将其中的`/home/<username>/~/.cargo`改为`~/.cargo`。但是每当打开终端时，环境变量PATH还是会自动添加`/home/<username>/~/.cargo/bin`
+- 安装时出现的问题（~~未完全~~解决）：默认`.cargo`环境变量设置为了`/home/<username>/~/.cargo`，导致在用户家目录下又新建了`~`目录，在安装完rust后，将`.cargo`目录移动到`~/`家目录下，并修改所有可能会更改环境变量的文件，包括`~/.profile`、`/etc/profile`、`/etc/bash.bashrc`、`~/.cargo/env`，将其中的`/home/<username>/~/.cargo`改为`~/.cargo`。但是每当打开终端时，环境变量PATH还是会自动添加`/home/<username>/~/.cargo/bin`
 
-  - 暂时的解决方案：在`~/.bashrc`文件中添加语句，覆盖错误的环境变量
+  - ~~暂时的~~解决方案：在`~/.bashrc`文件中添加语句，覆盖错误的环境变量(重启后就成功了)
 
     ```bash
     export PATH=~/.cargo/bin:$PATH
@@ -18,11 +18,18 @@
 
 ### 1.1 使用Cargo创建项目
 
-创建hello_world目录，并在其中新建项目hello_world
+- 创建hello_world目录，并在其中新建二进制项目hello_world
 
-```bash
-$ cargo new hello_world
-```
+  ```bash
+  $ cargo new hello_world
+  ```
+
+- 创建库项目
+
+  ```bash
+  $ cargo new hello_world --lib
+  ```
+
 
 #### 1.1.1 Cargo.toml
 
@@ -1533,4 +1540,395 @@ impl Summary for Tweet {
 - 不能为外部类型实现外部 trait：例如，不能在 `aggregator` crate 中为 `Vec<T>` 实现 `Display` trait。这是因为 `Display` 和 `Vec<T>` 都定义于标准库中，它们并不位于 `aggregator` crate 本地作用域中
 
 #### 10.2.2 默认实现
+
+有时为 trait 中的某些或全部方法提供默认的行为，而不是在每个类型的每个实现中都定义自己的行为是很有用的。这样当为某个特定类型实现 trait 时，可以选择保留或重载每个方法的默认行为
+
+```rust
+// trait提供默认实现
+pub trait Summary {
+    fn summarize(&self) -> String {
+        String::from("(Read more...)")
+    }
+}
+```
+
+#### 10.2.3 trait作为参数
+
+```rust
+pub fn notify(item: impl Summary) {
+    println!("Breaking news! {}", item.summarize());
+}
+```
+
+对于 `item` 参数，指定了 `impl` 关键字和 trait 名称，而不是具体的类型。该参数支持任何实现了指定 trait 的类型。在 `notify` 函数体中，可以调用任何来自 `Summary` trait 的方法，比如 `summarize`
+
+- 使用trait bound重写上面的函数
+
+  ```rust
+  pub fn notify<T: Summary>(item: T) {
+      println!("Breaking news! {}", item.summarize());
+  }
+  ```
+
+  - trait bound适合函数传入多个相同类型的参数
+
+    ```rust
+    // item1和item2的类型可以不同，只要它们都实现了Summary
+    pub fn notify(item1: impl Summary, item2: impl Summary) 
+        
+    // item1和item2的类型必须相同
+    pub fn notify<T: Summary>(item1: T, item2: T)
+    ```
+
+- 指定多个trait bound
+
+  ```rust
+  pub fn notify(item: impl Summary + Display)
+  // 或
+  pub fn notify<T: Summary + Display>(item: T)
+  ```
+
+- 通过 `where` 简化trait bound
+
+  ```rust
+  fn some_function<T, U>(t: T, u: U) -> i32
+      where T: Display + Clone,
+            U: Clone + Debug
+  {
+  ```
+
+#### 10.2.4 返回trait类型
+
+```rust
+fn returns_summarizable() -> impl Summary {
+    Tweet {
+        username: String::from("horse_ebooks"),
+        content: String::from("of course, as you probably already know, people"),
+        reply: false,
+        retweet: false,
+    }
+}
+```
+
+- 通过使用 `impl Summary` 作为返回值类型，我们指定了 `returns_summarizable` 函数返回某个实现了 `Summary` trait 的类型，但是不确定其具体的类型
+- 只适用于返回单一类型的情况，如果有分支结构，每个分支返回不同类型，则编译不能通过
+
+### 10.3 生命周期与引用有效性
+
+#### 10.3.1 生命周期防止悬垂引用
+
+- Rust 编译器有一个**借用检查器**，它比较作用域来确保所有的借用都是有效的
+- 避免了引用比数据的生命周期短的情况
+
+#### 10.3.2 函数的泛型生命周期
+
+```rust
+fn main() {
+    let string1 = String::from("abcd");
+    let string2 = "xyz";
+    let result = longest(string1.as_str(), string2);
+    println!("The longest string is {}", result);
+}
+
+fn longest(x: &str, y: &str) -> &str {
+    if x.len() > y.len() {
+        x
+    } else {
+        y
+    }
+}
+```
+
+- 返回值需要一个泛型生命周期参数，因为 Rust 并不知道将要返回的引用是指向 `x` 或 `y`
+
+##### 生命周期注解语法
+
+```rust
+&i32        // 引用
+&'a i32     // 带有显式生命周期的引用
+&'a mut i32 // 带有显式生命周期的可变引用
+```
+
+- 当有两个或以上的引用参数的生命周期注解都定义为 `&'a i32` ，则这些参数的生命周期必须与这泛型生命周期一样长
+
+##### 函数签名中的生命周期注解
+
+```rust
+// 重写上面的longest函数，指定了签名中所有的引用必须有相同的生命周期'a
+fn longest<'a>(x: &'a str, y: &'a str) -> &'a str {
+    if x.len() > y.len() {
+        x
+    } else {
+        y
+    }
+}
+```
+
+#### 10.3.3 结构体定义生命周期注解
+
+有生命周期注解的结构体可以存放引用
+
+```rust
+struct ImportantExcerpt<'a> {
+    part: &'a str,
+}
+```
+
+#### 10.3.4 生命周期省略
+
+编译器采用三条规则来判断引用何时不需要明确的注解，这些规则适用于 `fn` 定义，以及 `impl` 块
+
+- 每一个是引用的参数都有它自己的生命周期参数
+- 如果只有一个输入生命周期参数，那么它被赋予所有输出生命周期参数
+- 如果方法有多个输入生命周期参数，不过其中之一因为方法的缘故为 `&self` 或 `&mut self`，那么 `self` 的生命周期被赋给所有输出生命周期参数
+
+#### 10.3.5 方法定义中的生命周期注解
+
+（实现方法时）结构体字段的生命周期必须总是在 `impl` 关键字之后声明并在结构体名称之后被使用，因为这些生命周期是结构体类型的一部分。
+
+```rust
+struct ImportantExcerpt<'a> {
+    part: &'a str,
+}
+
+impl<'a> ImportantExcerpt<'a> {
+    fn announce_and_return_part(&self, announcement: &str) -> &str {
+        println!("Attention please: {}", announcement);
+        self.part
+    }
+}
+```
+
+#### 10.3.6 静态生命周期
+
+- `'static` 其生命周期**能够**存活于整个程序期间
+
+- 所有的字符串字面值都拥有 `'static` 生命周期
+
+## Ch11 编写自动化测试
+
+### 11.1 如何编写测试
+
+Rust 中的测试函数是用来验证非测试代码是否按照期望的方式运行的。测试函数体通常执行如下三种操作：
+
+1. 设置任何所需的数据或状态
+2. 运行需要测试的代码
+3. 断言其结果是我们所期望的
+
+#### 11.1.1 测试函数剖析
+
+- 为了将一个函数变成测试函数，需要在 `fn` 行之前加上 `#[test]`
+- 使用 `cargo test` 命令运行测试
+- 使用 Cargo 新建一个**库项目**时，它会自动为我们生成一个测试模块和一个测试函数
+
+```rust
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn exploration() {
+        assert_eq!(2 + 2, 4);
+    }
+}
+```
+
+#### 11.1.2 使用assert!宏来检查结果
+
+- 如果值是 `true`，`assert!` 什么也不做，同时测试会通过
+- 如果值为 `false`，`assert!` 调用 `panic!` 宏，这会导致测试失败
+
+#### 11.1.3 使用assert_eq!和assert_ne!宏来测试相等
+
+- `assert_eq!` 判断是否相等，`assert_ne!` 判断是否不等
+- 断言失败时他们会打印出这两个值具体是什么，以便于观察测试**为什么**失败
+
+#### 11.1.4 自定义失败信息
+
+为测试函数增加一个自定义失败信息参数：带占位符的格式字符串，以及 `greeting` 函数的值
+
+```rust
+#[test]
+fn greeting_contains_name() {
+    let result = greeting("Carol");
+    assert!(
+        result.contains("Carol"),
+        "Greeting did not contain name, value was `{}`", result
+    );
+}
+```
+
+#### 11.1.5 使用 should_panic 检查 panic
+
+- `#[should_panic]` 属性位于 `#[test]` 之后，对应的测试函数之前
+- 这个属性在函数中的代码 panic 时会通过，而在其中的代码没有 panic 时失败
+
+#### 11.1.6 将 Result<T, E> 用于测试
+
+```rust
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn it_works() -> Result<(), String> {
+        if 2 + 2 == 4 {
+            Ok(())
+        } else {
+            Err(String::from("two plus two does not equal four"))
+        }
+    }
+}
+```
+
+### 11.2 运行测试
+
+#### 11.2.1 并行或连续的运行测试
+
+- 当运行多个测试时， Rust 默认使用线程来并行运行
+
+- 应该确保测试不能相互依赖，或依赖任何共享的状态，包括依赖共享的环境
+
+- 如果有依赖，可以限制线程：
+
+  ```bash
+  $ cargo test -- --test-threads=1
+  ```
+
+#### 11.2.2 显示函数输出
+
+- 默认情况下，当测试通过时，Rust 的测试库会截获打印到标准输出的所有内容
+
+- 如果你希望也能看到通过的测试中打印的值，截获输出的行为可以通过 `--nocapture` 参数来禁用：
+
+  ```bash
+  $ cargo test --nocapture
+  ```
+
+#### 11.2.3 通过指定名字来运行部分测试
+
+- 运行单个测试，向 `cargo test` 传递任意测试的名称来只运行这个测试
+
+  ```bash
+  $ cargo test one_hundred
+  ```
+
+- 过滤运行多个测试，指定部分测试的名称，任何名称匹配这个名称的测试会被运行，以下命令运行了所有名字中带有 `add` 的测试
+
+  ```bash
+  $ cargo test add
+  ```
+
+#### 11.2.4 忽略某些测试
+
+使用 `ignore` 属性来标记耗时的测试并排除他们
+
+```rust
+#[test]
+fn it_works() {
+    assert_eq!(2 + 2, 4);
+}
+
+#[test]
+#[ignore]
+fn expensive_test() {
+    // 需要运行一个小时的代码
+}
+```
+
+如果只希望运行被忽略的测试，可以使用 `cargo test -- --ignored`
+
+### 11.3 测试的组织结构
+
+#### 11.3.1 单元测试
+
+- 单元测试的目的是在与其他部分隔离的环境中测试每一个单元的代码，以便于快速而准确的某个单元的代码功能是否符合预期。
+- 单元测试与他们要测试的代码共同存放在位于 *src* 目录下相同的文件中。
+- 规范是在每个文件中创建包含测试函数的 `tests` 模块，并使用 `cfg(test)` 标注模块。
+
+##### 测试模块
+
+测试模块的 `#[cfg(test)]` 注解告诉 Rust 只在执行 `cargo test` 时才编译和运行测试代码
+
+#### 11.3.2 集成测试
+
+- 集成测试的目的是测试库的多个部分能否一起正常工作
+- 二进制项目，即只有 *src/main.rs* 而没有 *src/lib.rs* 不能进行集成测试
+
+- 为了编写集成测试，需要在项目根目录创建一个 *tests* 目录，与 *src* 同级，可以随意在这个目录中创建任意多的测试文件
+- 需要在文件顶部添加 `use`
+
+```rust
+use adder;
+
+#[test]
+fn it_adds_two() {
+    assert_eq!(4, adder::add_two(2));
+}
+```
+
+## Ch12 I/O项目：命令行程序
+
+### 12.1 接受命令行参数
+
+- 使用标准库提供的函数：`std::env::args` ，返回一个传递给程序的命令行参数的**迭代器**
+
+```rust
+use std::env;
+
+fn main() {
+    let args: Vec<String> = env::args().collect();
+
+    let query = &args[1];
+    let filename = &args[2];
+
+    println!("Searching for {}", query);
+    println!("In file {}", filename);
+}
+```
+
+### 12.2 读取文件
+
+- 使用标准库  `std::fs` 来处理文件
+
+```rust
+let contents = fs::read_to_string(filename)
+        .expect("Something went wrong reading the file");
+println!("With text:\n{}", contents);
+```
+
+### 12.3 重构改进模块性和错误处理
+
+在 `main` 函数开始变得庞大时进行二进制程序的关注分离的指导性过程:
+
+- 将程序拆分成 *main.rs* 和 *lib.rs* 并将程序的逻辑放入 *lib.rs* 中。
+- 当命令行解析逻辑比较小时，可以保留在 *main.rs* 中。
+- 当命令行解析开始变得复杂时，也同样将其从 *main.rs* 提取到 *lib.rs* 中。
+
+经过这些过程之后保留在 `main` 函数中的责任应该被限制为：
+
+- 使用参数值调用命令行解析逻辑
+- 设置任何其他的配置
+- 调用 *lib.rs* 中的 `run` 函数
+- 如果 `run` 返回错误，则处理这个错误
+
+### 12.4 采用测试驱动开发完善库的功能
+
+测试驱动开发（Test Driven Development, TDD）模式，是一个软件开发技术，它遵循如下步骤：
+
+1. 编写一个会失败的测试，并运行它以确保其因为你期望的原因失败。
+2. 编写或修改刚好足够的代码来使得新的测试通过。
+3. 重构刚刚增加或修改的代码，并确保测试仍然能通过。
+4. 从步骤 1 开始重复！
+
+### 12.6 将错误信息输出到标准错误
+
+- 使用 `eprintln!` 将错误信息写入标准错误而不是标准输出
+
+- 使用输出重定向：
+
+  ```bash
+  $ cargo run to poem.txt > output.txt
+  ```
+
+  - 若出错，会输出到标准错误，即显示在命令行，而不写入 *output.txt*
+  - 若正常执行，会输出到标准输出，即重定向到 *output.txt*
+
+## Ch13 迭代器和闭包
 
