@@ -2149,5 +2149,226 @@ fn using_other_iterator_trait_methods() {
 }
 ```
 
+## Ch14 进一步认识Cargo和Crates.io
+
+### 14.1 采用发布配置自定义构建
+
+Cargo 有两个主要的配置：
+
+- 运行 `cargo build` 时采用的 `dev` 配置
+- 运行 `cargo build --release` 的 `release` 配置
+
+`dev` 配置被定义为开发时的好的默认配置，`release` 配置则有着良好的发布构建的默认配置
+
+可以在 *Cargo.toml* 文件中定义 `[profile.*]` 部分来覆盖默认配置
+
+```toml
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = 3
+```
+
+- `opt-level` 设置控制 Rust 会对代码进行何种程度的优化，值从0到3，越高的优化级别需要更多的时间编译
+
+### 14.2 将 crate 发布到 Crates.io
+
+### 14.3 Cargo工作空间
+
+### 14.4 从 Crates.io 安装二进制文件
+
+使用命令 `cargo install` 可以从crates.io下载二进制crate，安装到 *~/.cargo/bin* 
+
+## Ch15 智能指针
+
+### 15.1 Box\<T>
+
+box 允许将一个值放在堆上而不是栈上，留在栈上的则是指向堆数据的指针
+
+使用场景：
+
+- 当有一个在编译时未知大小的类型，而又想要在需要确切大小的上下文中使用这个类型值的时候
+- 当有大量数据并希望在确保数据不被拷贝的情况下转移所有权的时候
+- 当希望拥有一个值并只关心它的类型是否实现了特定 trait 而不是其具体类型的时候
+
+#### 15.1.1 Box创建递归类型
+
+- Rust 需要在编译时知道类型占用多少空间，而**递归类型**无法在编译的时候知道大小
+- box 有一个已知的大小，所以通过在循环类型定义中插入 box，就可以创建递归类型了
+
+##### 以cons list为例
+
+- cons list 的每一项都包含两个元素：当前项的值和下一项。
+
+- 其最后一项值包含一个叫做 `Nil` 的值且没有下一项。
+- cons list 通过递归调用 `cons` 函数产生。
+- 代表递归的终止条件（base case）的规范名称是 `Nil`，它宣布列表的终止。
+
+```rust
+enum List {
+    Cons(i32, List),
+    Nil,
+}
+
+use crate::List::{Cons, Nil};
+
+fn main() {
+    let list = Cons(1, Cons(2, Cons(3, Nil)));
+}
+```
+
+Rust编译器无法计算一个 `List` 需要的大小，因为编译器尝试计算出储存一个 `List` 枚举需要多少内存，并开始检查 `Cons` 成员，那么 `Cons` 需要的空间等于 `i32` 的大小加上 `List` 的大小。为了计算 `List` 需要多少内存，它检查其成员，从 `Cons` 成员开始。`Cons`成员储存了一个 `i32` 值和一个`List`值，这样的计算将无限进行下去。
+
+##### 使用Box\<T>给递归类型一个已知的大小
+
+```rust
+enum List {
+    Cons(i32, Box<List>),
+    Nil,
+}
+
+use crate::List::{Cons, Nil};
+
+fn main() {
+    let list = Cons(1,
+        Box::new(Cons(2,
+            Box::new(Cons(3,
+                Box::new(Nil))))));
+}
+```
+
+任何 `List` 值最多需要一个 `i32` 加上 box 指针数据的大小。通过使用 box ，打破了这无限递归的连锁，这样编译器就能够计算出储存 `List` 值需要的大小了。
+
+### 15.2 Deref trait
+
+实现 `Deref` trait 允许我们重载**解引用运算符** `*`
+
+#### 15.2.1 像引用一样使用 Box\<T>
+
+```rust
+fn main() {
+    let x = 5;
+    let y = Box::new(x);
+
+    assert_eq!(5, x);
+    assert_eq!(5, *y);
+}
+```
+
+#### 15.2.2 自定义智能指针
+
+定义 `MyBox<T>` 类型:
+
+```rust
+struct MyBox<T>(T);
+
+impl<T> MyBox<T> {
+    fn new(x: T) -> MyBox<T> {
+        MyBox(x)
+    }
+}
+```
+
+#### 15.2.3 在自定义智能指针实现 Deref trait 
+
+```rust
+use std::ops::Deref;
+
+impl<T> Deref for MyBox<T> {
+    // 定义trait的关联类型
+    type Target = T;
+    fn deref(&self) -> &T {
+        // deref返回了我希望通过*运算符访问的值的引用
+        &self.0
+    }
+}
+```
+
+当运行如下代码：
+
+```rust
+let x = 5;
+let y = MyBox::new(x);
+
+assert_eq!(5, *y);
+```
+
+`*y` 在Rust底层运行了 `*(y.deref())`
+
+#### 15.2.4 函数和方法的隐式解引用强制多态
+
+**解引用强制多态**是 Rust 在函数或方法传参上的一种便利。将实现了 `Deref` 的类型的引用转换为原始类型通过 `Deref` 所能够转换的类型的引用。
+
+```rust
+fn hello(name: &str) {
+    println!("Hello, {}!", name);
+}
+
+fn main() {
+    let m = MyBox::new(String::from("Rust"));
+    // 解引用强制多态将 &MyBox<String> 自动转换为 &str
+    hello(&m);
+}
+```
+
+### 15.3 Drop trait
+
+- 允许我们在值要离开作用域时执行一些代码，可以为任何类型提供 `Drop` trait 的实现，同时所指定的代码被用于释放类似于文件或网络连接的资源
+
+- 通过 `Drop` trait 中的 `drop` 方法，可以在变量离开作用域时自动丢弃该值
+
+#### 15.3.1 通过 std::mem::drop 提早丢弃值
+
+- Rust不允许我们主动调用 `Drop` trait 的 `drop` 方法
+- 当我们希望在作用域结束之前就强制释放变量的话，我们应该使用的是由标准库提供的 `std::mem::drop`，其位于preclude，可以直接通过 `drop(variable);` 调用
+
+### 15.4 Rc\<T> 引用计数智能指针
+
+- 有些情况单个值可能会有多个所有者。例如，在图数据结构中，多个边可能指向相同的结点，而这个结点从概念上讲为所有指向它的边所拥有。结点直到没有任何边指向它之前都不应该被清理。
+
+- Rust 使用**引用计数** `Rc<T>` 的类型来启用多所有权，记录了一个值引用的数量来知晓这个值是否仍在被使用。
+
+- `Rc<T>` 用于当我们希望在堆上分配一些内存供程序的多个部分读取，而且无法在编译时确定程序的哪一部分会最后结束使用它的时候。
+
+- `Rc<T>` 只能用于单线程场景
+
+#### 15.4.1 使用 Rc\<T> 共享数据
+
+使用 `Box<T>` 定义的 cons list 的两个列表 `b` 和 `c`, 共享第三个列表 `a` 的所有权
+
+![image-20201112210915469](.Rust-notes/image-20201112210915469.png)
+
+```rust
+enum List {
+    Cons(i32, Rc<List>),
+    Nil,
+}
+
+use crate::List::{Cons, Nil};
+use std::rc::Rc;
+
+fn main() {
+    let a = Rc::new(Cons(5, Rc::new(Cons(10, Rc::new(Nil)))));
+    let b = Cons(3, Rc::clone(&a));
+    let c = Cons(4, Rc::clone(&a));
+}
+```
+
+- `Rc::clone` 只会增加引用计数，而不会深拷贝
+- 在程序中每个引用计数变化的点，会打印出引用计数，其值可以通过调用 `Rc::strong_count` 函数获得
+
+### 15.5 RefCell\<T> 和内部可变性模式
+
+**内部可变性**是 Rust 中的一个设计模式，它允许你即使在有不可变引用时也可以改变数据，这通常是借用规则所不允许的
+
+### 15.6 引用循环与内存泄漏
+
+Rust 的内存安全性保证使其难以意外地制造永远也不会被清理的内存，但是创建引用循环从而造成内存泄漏的可能性是存在的
+
+## Ch16 并发
+
+### 16.1 使用线程同时运行代码
+
 
 
