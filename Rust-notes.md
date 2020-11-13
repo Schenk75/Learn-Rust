@@ -2370,5 +2370,378 @@ Rust 的内存安全性保证使其难以意外地制造永远也不会被清理
 
 ### 16.1 使用线程同时运行代码
 
+线程是同时运行的，所以无法预先保证不同线程中的代码的执行顺序。这会导致诸如此类的问题：
 
+- 竞争状态，多个线程以不一致的顺序访问数据或资源
+- 死锁，两个线程相互等待对方停止使用其所拥有的资源，这会阻止它们继续运行
+- 只会发生在特定情况且难以稳定重现和修复的 bug
 
+#### 16.1.1 使用 spawn 创建新线程
+
+为了创建一个新线程，需要调用 `thread::spawn` 函数并传递一个闭包，并在其中包含希望在新线程运行的代码
+
+```rust
+use std::thread;
+use std::time::Duration;
+
+fn main() {
+    thread::spawn(|| {
+        for i in 1..10 {
+            println!("hi number {} from the spawned thread!", i);
+            // thread::sleep调用强制线程停止执行一小段时间，允许其他不同的线程运行
+            thread::sleep(Duration::from_millis(1));
+        }
+    });
+
+    for i in 1..5 {
+        println!("hi number {} from the main thread!", i);
+        thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/*
+输出：
+hi number 1 from the main thread!
+hi number 1 from the spawned thread!
+hi number 2 from the main thread!
+hi number 2 from the spawned thread!
+hi number 3 from the main thread!
+hi number 3 from the spawned thread!
+hi number 4 from the main thread!
+hi number 4 from the spawned thread!
+hi number 5 from the spawned thread!
+*/
+```
+
+- 当主线程结束时，新线程也会结束，而不管其是否执行完毕
+
+#### 16.1.2 使用 join 等待所有线程结束
+
+- `thread::spawn` 的返回值类型是 `JoinHandle`
+- `JoinHandle` 是一个拥有所有权的值，当对其调用 `join` 方法时，它会等待其线程结束
+- 通过调用 handle 的 join 会阻塞当前线程直到 handle 所代表的线程结束
+
+```rust
+use std::thread;
+use std::time::Duration;
+
+fn main() {
+    // 从thread::spawn保存一个JoinHandle来确保该线程能够运行结束
+    let handle = thread::spawn(|| {
+        for i in 1..10 {
+            println!("hi number {} from the spawned thread!", i);
+            thread::sleep(Duration::from_millis(1));
+        }
+    });
+
+    for i in 1..5 {
+        println!("hi number {} from the main thread!", i);
+        thread::sleep(Duration::from_millis(1));
+    }
+
+    handle.join().unwrap();
+}
+```
+
+#### 16.1.3 线程与 move 闭包
+
+在参数列表前使用 `move` 关键字强制闭包获取其使用的环境值的所有权，可用于创建新线程时将值的所有权从一个线程移动到另一个线程
+
+```rust
+use std::thread;
+
+fn main() {
+    let v = vec![1, 2, 3];
+
+    let handle = thread::spawn(move || {
+        println!("Here's a vector: {:?}", v);
+    });
+
+    handle.join().unwrap();
+}
+```
+
+### 16.2 线程间消息传递
+
+Rust 中一个实现消息传递并发的主要工具是**通道**
+
+```rust
+use std::thread;
+use std::sync::mpsc;
+
+fn main() {
+    let (tx, rx) = mpsc::channel();
+
+    thread::spawn(move || {
+        let val = String::from("hi");
+        tx.send(val).unwrap();
+    });
+    
+    let received = rx.recv().unwrap();
+    println!("Got: {}", received);
+}
+```
+
+- 使用 `mpsc::channel` 函数创建一个新的通道，可以有多个**发送端**，但只能有一个**接收端**， `mpsc::channel` 函数返回一个元组：(发送端，接收端)，或 `(tx, rx)`
+- 通道的发送端有一个 `send` 方法用来获取需要放入通道的值，返回一个 `Result<T, E>` 类型
+  
+  - `send` 函数获取其参数的所有权并移动这个值归接收者所有，所以线程在发送 `val` 之后就不能再使用它了
+- 通道的接收端有两个有用的方法：`recv` 和 `try_recv`
+  - `recv` 会阻塞主线程执行直到从通道中接收一个值，一旦发送了一个值，`recv` 会在一个 `Result<T, E>` 中返回它；当通道发送端关闭，`recv` 会返回一个错误表明不会再有新的值到来了
+  - `try_recv` 不会阻塞，立刻返回一个 `Result<T, E>`：`Ok` 值包含可用的信息，而 `Err` 值代表此时没有任何消息
+
+- 可以将 `rx` 作为迭代器来接收发送端发送的多个数据，并通过 `for` 循环打印
+
+- 可以通过 `clone` 方法来创建多个发送端:
+
+  ```rust
+  let (tx, rx) = mpsc::channel();
+  let tx1 = mpsc::Sender::clone(&tx);
+  ```
+
+### 16.3 共享状态并发
+
+#### 16.3.1 互斥器
+
+- 通过**锁**来保证任意时刻只有一个线程能访问某些数据
+- 使用方式：
+  - 在使用数据之前尝试获取锁。
+  - 处理完被互斥器所保护的数据之后，必须解锁数据，这样其他线程才能够获取锁。
+- 使用 `Mutex<T>` 实现
+  - 通过关联函数 `new` 来创建 `Mutex<T>`
+  - 使用 `lock` 方法获取锁，该方法会阻塞当前线程，直到拥有锁为止
+  - `lock` 调用返回一个叫做 `MutexGuard` 的智能指针，当其离开作用域时，会自动释放锁
+
+#### 16.3.2 在线程间共享 Mutex\<T>
+
+```rust
+use std::sync::{Mutex, Arc};
+use std::thread;
+
+fn main() {
+    let counter = Arc::new(Mutex::new(0));
+    let mut handles = vec![];
+
+    for _ in 0..10 {
+        let counter = Arc::clone(&counter);
+        let handle = thread::spawn(move || {
+            let mut num = counter.lock().unwrap();
+            *num += 1;
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    println!("Result: {}", *counter.lock().unwrap());
+}
+```
+
+- 使用**原子引用计数** `Arc<T>` 来实现 `Mutex<T>` 在多线程之间共享所有权
+
+## Ch17 Rust面向对象
+
+### 17.1 面向对象语言的特征
+
+- 对象包含数据和行为：结构体和枚举包含数据，`impl` 块提供对应方法
+- 封装隐藏了实现细节：不添加 `pub` 就是私有的
+- 通过继承重用代码：使用 `trait` 对象
+
+### 17.2 为使用不同类型的值而设计的 trait 对象
+
+### 17.3 面向对象设计模式的实现
+
+## Ch18 模式
+
+### 18.1 用到模式的位置
+
+#### 18.1.1 match分支
+
+在形式上 `match` 表达式由 `match` 关键字、用于匹配的值和一个或多个分支构成，这些分支包含一个模式和在值匹配分支的模式时运行的表达式
+
+```rust
+match VALUE {
+    PATTERN => EXPRESSION,
+    PATTERN => EXPRESSION,
+    PATTERN => EXPRESSION,
+}
+```
+
+#### 18.1.2 if let 表达式
+
+- 等同于只关心一个情况的 `match` 语句简写
+- `if let` 表达式的缺点在于其穷尽性没有为编译器所检查，而 `match` 表达式则检查了
+
+#### 18.1.3 while let 条件循环
+
+允许只要模式匹配就一直进行 `while` 循环
+
+#### 18.1.4 for循环
+
+```rust
+for (index, value) in v.iter().enumerate() {}
+```
+
+使用 `(index, value)` 来匹配 `enumerate`
+
+#### 18.1.5 let语句
+
+```rust
+let PATTERN = EXPRESSION;
+```
+
+#### 18.1.6 函数参数
+
+```rust
+fn foo(x: i32) {
+    // 代码
+}
+```
+
+`x` 部分就是一个模式
+
+### 18.2 可反驳和不可反驳
+
+- 能匹配任何传递的可能值的模式被称为是**不可反驳的**，如 `let x = 5;` 中的 `x`
+- 对某些可能的值进行匹配会失败的模式被称为是**可反驳的**，如 `if let Some(x) = a_value` 中的 `Some(x)`
+
+- 函数参数、 `let` 语句和 `for` 循环只能接受不可反驳的模式
+- 匹配分支必须使用可反驳模式，如 `if let`
+
+### 18.3 模式语法
+
+#### 18.3.1 匹配字面值
+
+```rust
+let x = 1;
+
+match x {
+    1 => println!("one"),
+    2 => println!("two"),
+    3 => println!("three"),
+    _ => println!("anything"),
+}
+```
+
+#### 18.3.2 匹配命名变量
+
+命名变量是匹配任何值的不可反驳模式，当其用于 `match` 表达式时，情况会不一样
+
+```rust
+fn main() {
+    let x = Some(5);
+    let y = 10;
+
+    match x {
+        Some(50) => println!("Got 50"),
+        Some(y) => println!("Matched, y = {:?}", y),
+        _ => println!("Default case, x = {:?}", x),
+    }
+
+    println!("at the end: x = {:?}, y = {:?}", x, y);
+}
+
+/*
+会打印：
+Matched, y = 5
+at the end: x = Some(5), y = 10
+*/
+```
+
+- 在 `match` 表达式的新作用域中， `y` 是一个新变量，而不是开头声明为值 10 的那个 `y` ，新的 `y` 绑定会匹配任何 `Some` 中的值，在这里是 `x` 中的值
+
+#### 18.3.3 多个模式
+
+使用 `|` 语法匹配多个模式
+
+```rust
+let x = 1;
+
+match x {
+    1 | 2 => println!("one or two"),
+    3 => println!("three"),
+    _ => println!("anything"),
+}
+```
+
+#### 18.3.4 通过 ..= 匹配值的范围
+
+- 使用 `1..=5` 替代 `1 | 2 | 3 | 4 | 5`
+
+- 对 `char` 类型也适用：`'a'..='j'`
+
+#### 18.3.5 忽略模式中的值
+
+- 使用 `_` 忽略整个值
+
+- 通过 `_x` 来忽略未使用的变量
+
+- 使用 `..` 忽略剩余的值
+
+  ```rust
+  fn main() {
+      let numbers = (2, 4, 8, 16, 32);
+  
+      match numbers {
+          (first, .., last) => {
+              println!("Some numbers: {}, {}", first, last);
+          },
+      }
+  }
+  ```
+
+#### 18.3.6 匹配守卫
+
+**匹配守卫**（*match guard*）是一个指定于 `match` 分支模式之后的额外 `if` 条件，它也必须被满足才能选择此分支
+
+```rust
+let num = Some(4);
+
+match num {
+    Some(x) if x < 5 => println!("less than five: {}", x),
+    Some(x) => println!("{}", x),
+    None => (),
+}
+```
+
+#### 18.3.7 @绑定
+
+- `@` 允许我们在创建一个存放值的变量的同时测试其值是否匹配模式
+
+- 使用 `@` 可以在一个模式中同时测试和保存变量值
+
+  ```rust
+  enum Message {
+      Hello { id: i32 },
+  }
+  
+  let msg = Message::Hello { id: 5 };
+  
+  match msg {
+      // 将id值保存在id_variable中
+      Message::Hello { id: id_variable @ 3..=7 } => {
+          println!("Found an id in range: {}", id_variable)
+      },
+      // 无法保存id值
+      Message::Hello { id: 10..=12 } => {
+          println!("Found an id in another range")
+      },
+      Message::Hello { id } => {
+          println!("Found some other id: {}", id)
+      },
+  }
+  ```
+
+## Ch19 高级特征
+
+### 19.1 不安全的Rust
+
+### 19.2 高级trait
+
+### 19.3 高级类型
+
+### 19.4 高级函数与闭包
+
+### 19.5 宏
