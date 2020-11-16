@@ -335,6 +335,40 @@ let number = if condition {
 
 - 无限循环，直到按下ctrl+c，或有break
 
+- 内循环可以 `continue` 或者 `break` 外循环，此时需要在外循环添加生命周期：
+
+  ```rust
+  #![allow(unreachable_code)]
+  
+  fn main() {
+      'outer: loop {
+          println!("Entered the outer loop");
+          'inner: loop {
+              println!("Entered the inner loop");
+              // This would break only the inner loop
+              //break;
+              // This breaks the outer loop
+              break 'outer;
+          }
+      }
+  }
+  ```
+
+- `loop` 可以返回值，返回 `break` 后的表达式
+
+  ```rust
+  fn main() {
+      let mut counter = 0;
+      let result = loop {
+          counter += 1;
+          if counter == 10 {
+              break counter * 2;
+          }
+      };
+      assert_eq!(result, 20);
+  }
+  ```
+
 ##### while
 
 ```rust
@@ -350,8 +384,21 @@ while number != 0 {
 ```rust
 let a = [10, 20, 30, 40, 50];
 
+// iter引用集合a，在循环结束后仍然可以使用a
 for element in a.iter() {
     println!("the value is: {}", element);
+}
+
+// into_iter移动集合a的所有权，在循环结束后不能使用a
+for element in a.into_iter() {
+    println!("the value is: {}", element);
+}
+
+let mut b = [1, 2, 3];
+
+// iter_mut引用可变集合b，可以在循环中改变b中的元素
+for element in b.iter_mut() {
+    *element += 1;
 }
 ```
 
