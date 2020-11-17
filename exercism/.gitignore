@@ -1,0 +1,6 @@
+target
+rust_test
+*.txt
+.exercism
+README.md
+*.lock
