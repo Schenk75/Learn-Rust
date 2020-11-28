@@ -20,3 +20,8 @@
 
 - int列表排序、去重
 - for循环step_by
+
+### clock
+
+- 结构体使用trait (derive)
+- 格式化输出 (时间的输出：自动补零)
