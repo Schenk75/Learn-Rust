@@ -25,3 +25,13 @@
 
 - 结构体使用trait (derive)
 - 格式化输出 (时间的输出：自动补零)
+
+### simple-linked-list
+
+- 链表完整版
+- Box指针
+- peek方法的实现?(as_ref())
+
+### pascals-triangle
+
+- 在循环中修改vec(使用引用)
