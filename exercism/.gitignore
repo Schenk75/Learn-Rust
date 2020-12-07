@@ -4,3 +4,4 @@ rust_test
 .exercism
 README.md
 *.lock
+.vscode
