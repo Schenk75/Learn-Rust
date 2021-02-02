@@ -1,0 +1,9 @@
+[package]
+name = "lcof39-数组中出现次数超过一半的数字"
+version = "0.1.0"
+authors = ["schenk <sck_01@qq.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
