@@ -3,7 +3,6 @@
 struct CubeSat {
     id: u64
 }
-
 #[derive(Debug)]
 enum StatusMessage {
     Ok,
